@@ -11,10 +11,11 @@ local function __boot(name)
 end
 __boot("script_start")
 
--- wait for the game to fully load before touching module scripts or remotes
+-- non-blocking load check: the GUI can build while the game finishes streaming
 if not game:IsLoaded() then
-	game.Loaded:Wait()
+	warn("[Crossaint Hub] game still loading — building GUI in parallel")
 end
+__boot("load_check_done")
 
 -- wait for LocalPlayer (nil on very first tick in rare executors)
 local localPlayer = Players.LocalPlayer
@@ -29,9 +30,9 @@ if not localPlayer then
 end
 __boot("local_player_ready")
 
--- wait for the Remotes/Gameplay tree with a real timeout
-local remotes = ReplicatedStorage:WaitForChild("Remotes", 30)
-local gameplay = remotes and remotes:WaitForChild("Gameplay", 30)
+-- check once — stub + background bridge if not replicated yet
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+local gameplay = remotes and remotes:FindFirstChild("Gameplay")
 if not gameplay then
 	warn("[Crossaint Hub] Gameplay remote not ready — building GUI with stub, bridging in background.")
 	local stubRoundStart = Instance.new("BindableEvent")
@@ -61,21 +62,19 @@ __boot("gameplay_ready")
 -- non-blocking CurrentRoundClient: build GUI first, bridge in when ready
 local CurrentRoundClient
 do
+	local stubBindable = Instance.new("BindableEvent")
 	local stub = {
 		PlayerData = {},
-		PlayerDataChanged = { Event = Instance.new("BindableEvent").Event },
+		PlayerDataChanged = { Event = stubBindable.Event },
 	}
 	CurrentRoundClient = stub
-	local deadline = os.clock() + 30
-	while os.clock() < deadline do
+	do
 		local ok, result = pcall(function()
 			return require(ReplicatedStorage.Modules.CurrentRoundClient)
 		end)
 		if ok and result and type(result) == "table" and result.PlayerData ~= nil then
 			CurrentRoundClient = result
-			break
 		end
-		task.wait(0.15)
 	end
 	if CurrentRoundClient == stub then
 		warn("[Crossaint Hub] CurrentRoundClient not ready — building GUI with stub, bridging in background.")
@@ -96,7 +95,7 @@ do
 						if real.PlayerDataChanged and real.PlayerDataChanged.Event then
 							real.PlayerDataChanged.Event:Connect(function()
 								sync()
-								pcall(function() stub.PlayerDataChanged.Event:Fire() end)
+								pcall(function() stubBindable:Fire() end)
 							end)
 						end
 					end)
@@ -6577,7 +6576,11 @@ do
 	end
 
 	local ok, result = pcall(function()
-		return require(ReplicatedStorage:WaitForChild("ClientServices"):WaitForChild("WeaponService"))
+		local cs = ReplicatedStorage:FindFirstChild("ClientServices")
+		if not cs then return nil end
+		local ws = cs:FindFirstChild("WeaponService")
+		if not ws then return nil end
+		return require(ws)
 	end)
 
 	if ok and result and result.GunFired then
@@ -7030,11 +7033,14 @@ do
 	table.insert(killFxConns, Players.PlayerAdded:Connect(fn18))
 
 	local ok, result = pcall(function()
-		return require(ReplicatedStorage:WaitForChild("ClientServices"):WaitForChild("WeaponService"))
+		local cs = ReplicatedStorage:FindFirstChild("ClientServices")
+		if not cs then return nil end
+		local ws = cs:FindFirstChild("WeaponService")
+		if not ws then return nil end
+		return require(ws)
 	end)
 
 	if ok and result and result.GunFired then
-		table.insert(killFxConns, result.GunFired.OnClientEvent:Connect(function(arg, arg2)
 			local position = typeof(arg2) == "Vector3" and arg2 or typeof(arg2) == "Instance" and arg2:IsA("BasePart") and arg2.Position
 
 			if not position then
