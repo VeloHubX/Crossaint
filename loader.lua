@@ -1,8 +1,19 @@
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
+local Players
+Players = game:GetService("Players")
+local RunService
+RunService = game:GetService("RunService")
+local ReplicatedStorage
+ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService
+UserInputService = game:GetService("UserInputService")
+local TweenService
+TweenService = game:GetService("TweenService")
+local localPlayer
+localPlayer = Players.LocalPlayer
+local gameplay
+gameplay = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Gameplay")
+local CurrentRoundClient
+CurrentRoundClient = require(ReplicatedStorage.Modules.CurrentRoundClient)
 
 -- boot trace: defined first so every later stamp can fire
 _G.__BootTrace = {}
@@ -812,6 +823,15 @@ do
 	end
 
 	local function fn9()
+		if not _G.__WorkspaceWarm then
+			local ok = pcall(function()
+				return game:IsLoaded() and #workspace:GetChildren() > 0
+			end)
+			if not (ok and game:IsLoaded()) then
+				return
+			end
+			_G.__WorkspaceWarm = true
+		end
 		for _, descendant in ipairs(workspace:GetDescendants()) do
 			if descendant.Name == "Coin_Server" and descendant:IsA("BasePart") then
 				fn8(descendant)
@@ -829,7 +849,7 @@ do
 		end
 	end
 
-	task.defer(fn9)
+	fn9()
 
 	_G.CoinESPConn = {
 		(workspace.DescendantAdded:Connect(function(descendant)
@@ -11468,11 +11488,16 @@ local function fn12()
 			UIScale.Scale = fn28()
 		end
 
-		task.defer(fn30)
-
-		if workspace.CurrentCamera then
-			table.insert(tbl11, workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fn30))
-		end
+		task.spawn(function()
+			local deadline = os.clock() + 5
+			while not workspace.CurrentCamera and os.clock() < deadline do
+				task.wait(0.05)
+			end
+			fn30()
+			if workspace.CurrentCamera then
+				table.insert(tbl11, workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fn30))
+			end
+		end)
 
 		local Frame4 = fn14("Frame", { Name = "Sidebar", BackgroundColor3 = tbl6.side, Size = UDim2.new(0, sideBarWidth, 1, 0), Parent = Frame2 })
 		fn15(Frame4, 16)
@@ -16546,7 +16571,7 @@ _G.__BuildPlayersTab = function()
 	end))
 end
 
-task.defer(_G.__BuildPlayersTab)
+_G.__BuildPlayersTab()
 
 do
 	local themeColor = _G.__ThemeColor
@@ -16773,10 +16798,8 @@ do
 		frame.Parent = scrollingFrame
 	end
 
-	task.defer(function()
-		fn15(tbl5.GunSkins, "Gun")
-		fn15(tbl5.KnifeSkins, "Knife")
-	end)
+	fn15(tbl5.GunSkins, "Gun")
+	fn15(tbl5.KnifeSkins, "Knife")
 end
 
 _G.BuildCrosshairPicker = function()
@@ -17098,7 +17121,7 @@ _G.BuildCrosshairPicker = function()
 	frame.Parent = scrollingFrame
 end
 
-task.defer(_G.BuildCrosshairPicker)
+_G.BuildCrosshairPicker()
 tbl5.Home:Select()
 
 do
@@ -17837,29 +17860,24 @@ __boot("init_complete")
 print(string.format("[Crossaint Hub] init complete — %.3fs from script_start", os.clock() - (_G.__BootTrace[1] and _G.__BootTrace[1].t or 0)))
 
 do
-	local function fn15(arg)
+	local function disableAutoLocalize(arg)
 		pcall(function()
 			arg.AutoLocalize = false
 		end)
-
-		for _, descendant in ipairs(arg:GetDescendants()) do
-			pcall(function()
-				descendant.AutoLocalize = false
-			end)
-		end
 	end
 
 	local hui = gethui()
 
 	for _, child in ipairs(hui:GetChildren()) do
-		fn15(child)
+		disableAutoLocalize(child)
+		for _, descendant in ipairs(child:GetDescendants()) do
+			disableAutoLocalize(descendant)
+		end
 	end
 
 	local connection2 = hui.DescendantAdded:Connect(function(descendant)
 		task.defer(function()
-			pcall(function()
-				descendant.AutoLocalize = false
-			end)
+			disableAutoLocalize(descendant)
 		end)
 	end)
 
