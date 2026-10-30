@@ -5,7 +5,7 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 
 -- boot trace: defined first so every later stamp can fire
-_G.__BootTrace = _G.__BootTrace or {}
+_G.__BootTrace = {}
 local function __boot(name)
 	table.insert(_G.__BootTrace, { name = name, t = os.clock() })
 end
@@ -7041,6 +7041,7 @@ do
 	end)
 
 	if ok and result and result.GunFired then
+		table.insert(killFxConns, result.GunFired.OnClientEvent:Connect(function(arg1, arg2)
 			local position = typeof(arg2) == "Vector3" and arg2 or typeof(arg2) == "Instance" and arg2:IsA("BasePart") and arg2.Position
 
 			if not position then
@@ -7049,7 +7050,7 @@ do
 
 			local character = localPlayer.Character
 			local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
-			local flag2 = typeof(arg) == "Instance" and character and arg:IsDescendantOf(character)
+			local flag2 = typeof(arg1) == "Instance" and character and arg1:IsDescendantOf(character)
 
 			if not flag2 and position and humanoidRootPart then
 				flag2 = (humanoidRootPart.Position - position).Magnitude < 14
