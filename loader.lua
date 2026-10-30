@@ -8,6 +8,7 @@ local TweenService = game:GetService("TweenService")
 _G.__BootTrace = {}
 local function __boot(name)
 	table.insert(_G.__BootTrace, { name = name, t = os.clock() })
+	print(string.format("[Crossaint Hub boot] %s @ %.3fs", name, os.clock() - (_G.__BootTrace[1] and _G.__BootTrace[1].t or 0)))
 end
 __boot("script_start")
 
@@ -436,20 +437,75 @@ pcall(function()
 	end
 end)
 
-do
-	local ok, result = pcall(function()
-		return gethui()
-	end)
+-- F: if the block above aborted partway, some globals are still live.
+-- Force-clear the highest-risk ones that would double-install or duplicate
+-- connections on the next run.
+pcall(function()
+	for _, name in ipairs({
+		"__InRoundGuardConn", "__GunKillEffectConn", "AutoFarmCharConn",
+		"AutoFarmDiedConn", "__RoleFlingLoopId", "__KillAllLoopId",
+		"__TriggerLoopId", "__AutoCaseLoopId", "__QuickShootLoopId",
+		"__DailyQuestLoopId", "__HomeLoopId", "__FarmStatsLoopId",
+		"__FarmWebhookLoopId", "__CoinRescanLoopId", "__RoleRescanLoopId",
+		"__BagPollLoopId", "__AutoThrowKnifeLoopId", "__AutoGrabGunLoopId",
+	}) do
+		local v = _G[name]
+		if typeof(v) == "RBXScriptConnection" and v.Connected then
+			pcall(function() v:Disconnect() end)
+		end
+		_G[name] = nil
+	end
+	if type(_G.CoinESPConn) == "table" then
+		for _, c in ipairs(_G.CoinESPConn) do
+			if typeof(c) == "RBXScriptConnection" and c.Connected then
+				pcall(function() c:Disconnect() end)
+			end
+		end
+		_G.CoinESPConn = nil
+	end
+	if type(_G.__KillFxConns) == "table" then
+		for _, c in ipairs(_G.__KillFxConns) do
+			if typeof(c) == "RBXScriptConnection" and c.Connected then
+				pcall(function() c:Disconnect() end)
+			end
+		end
+		_G.__KillFxConns = nil
+	end
+end)
 
-	if ok and result then
-		for _, child in ipairs(result:GetChildren()) do
-			if child.Name == "ScreenGui" then
-				pcall(function()
-					child:Destroy()
-				end)
+do
+	-- Previous executions leave multiple GUIs stacked. The literal name
+	-- "ScreenGui" only matches default-named instances, so the original
+	-- sweep was a no-op. Match the actual names this script creates.
+	local HUB_GUI_NAMES = {
+		StarUI = true,
+		StarUI_Overlay = true,
+		StarUI_Toggle = true,
+		StarUI_Notify = true,
+		MarbegQuickShoot = true,
+		MarbegQuickRageShoot = true,
+		MarbegThrowAimbot = true,
+		MarbegKillAll = true,
+		MarbegCoinESP = true,
+		MarbegRoleESP = true,
+		MarbegESPOverlay = true,
+		MarbegCrosshair = true,
+		MarbegDailyQuestChecker = true,
+	}
+	local function sweep(container)
+		if not container then return end
+		for _, child in ipairs(container:GetChildren()) do
+			if HUB_GUI_NAMES[child.Name] then
+				pcall(function() child:Destroy() end)
 			end
 		end
 	end
+	local ok, result = pcall(function() return gethui() end)
+	if ok and result then sweep(result) end
+	local pgOk, pg = pcall(function()
+		return game:GetService("Players").LocalPlayer:FindFirstChildOfClass("PlayerGui")
+	end)
+	if pgOk and pg then sweep(pg) end
 end
 
 pcall(function()
@@ -492,6 +548,18 @@ fn2 = function()
 	if ok and result then
 		return result
 	end
+
+	-- gethui() unavailable: PlayerGui is always writable from a LocalScript.
+	-- CoreGui assignment throws from identity-2, which previously killed the
+	-- whole spine on the first folder.Parent = fn2() call and left the GUI
+	-- uncreated. PlayerGui keeps the widgets visible on the player's screen.
+	local pgOk, pg = pcall(function()
+		return game:GetService("Players").LocalPlayer:FindFirstChildOfClass("PlayerGui")
+	end)
+	if pgOk and pg then
+		return pg
+	end
+
 	return game:GetService("CoreGui")
 end
 
@@ -8325,8 +8393,18 @@ _G.SilentThrowEnabled = false
 
 do
 	local ok, result = pcall(function()
-		return require(ReplicatedStorage:WaitForChild("ClientServices"):WaitForChild("WeaponService"))
+		local cs = ReplicatedStorage:WaitForChild("ClientServices", 10)
+		if not cs then return nil end
+		local ws = cs:WaitForChild("WeaponService", 10)
+		if not ws then return nil end
+		return require(ws)
 	end)
+	if not ok then
+		warn("[Crossaint Hub] Silent-aim require failed: " .. tostring(result) .. " — continuing without silent aim.")
+		result = nil
+	elseif result == nil then
+		warn("[Crossaint Hub] Silent-aim unavailable: ClientServices/WeaponService did not replicate within 10s — continuing without silent aim.")
+	end
 
 	local tbl5 = { "UpperTorso", "HumanoidRootPart", "Torso", "LowerTorso", "Head" }
 
@@ -11107,14 +11185,7 @@ local function fn12()
 	end
 
 	local function fn24()
-		local ok, result = pcall(function()
-			return gethui()
-		end)
-
-		if ok and result then
-			return result
-		end
-		return game:GetService("CoreGui")
+		return fn2()
 	end
 
 	local function fn25(arg, arg2)
@@ -14356,29 +14427,39 @@ end
 
 local v5
 
-v5 = starUI:CreateWindow({
-	Title = "Crossaint Hub",
-	Icon = "star",
-	Logo = "rbxthumb://type=Asset&id=133732828241667&w=420&h=420",
-	Author = "Murder Mystery 2",
-	Folder = "MarbegMM2",
-	Size = UDim2.fromOffset(740, 520),
-	MinSize = Vector2.new(560, 380),
-	Resizable = true,
-	SideBarWidth = 210,
-	HideSearchBar = true,
-	ScrollBarEnabled = false,
-	User = { Enabled = true, Anonymous = false },
-	OpenButton = {
+local createOk, createErr = pcall(function()
+	v5 = starUI:CreateWindow({
 		Title = "Crossaint Hub",
 		Icon = "star",
-		CornerRadius = UDim.new(1, 0),
-		StrokeThickness = 2,
-		Enabled = true,
-		Draggable = true,
-		OnlyMobile = true,
-	},
-})
+		Logo = "rbxthumb://type=Asset&id=133732828241667&w=420&h=420",
+		Author = "Murder Mystery 2",
+		Folder = "MarbegMM2",
+		Size = UDim2.fromOffset(740, 520),
+		MinSize = Vector2.new(560, 380),
+		Resizable = true,
+		SideBarWidth = 210,
+		HideSearchBar = true,
+		ScrollBarEnabled = false,
+		User = { Enabled = true, Anonymous = false },
+		OpenButton = {
+			Title = "Crossaint Hub",
+			Icon = "star",
+			CornerRadius = UDim.new(1, 0),
+			StrokeThickness = 2,
+			Enabled = true,
+			Draggable = true,
+			OnlyMobile = true,
+		},
+	})
+end)
+
+if not createOk then
+	error("[Crossaint Hub] FATAL: CreateWindow threw — " .. tostring(createErr))
+end
+if not v5 or not v5.Root or not v5.Root.Parent then
+	error("[Crossaint Hub] FATAL: CreateWindow returned an invalid window (root not parented).")
+end
+warn("[Crossaint Hub] Window created. Parent = " .. v5.Root.Parent:GetFullName())
 
 _G.WindUIWindow = v5
 _G.ObsidianWindow = nil
